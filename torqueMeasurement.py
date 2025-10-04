@@ -1,6 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import filedialpy as fd
+from scipy.signal import medfilt
+from scipy.interpolate import interp1d
 
 
 class TorqueMeasurement:
@@ -96,7 +98,6 @@ class TorqueMeasurement:
         plt.xlabel("Index [#]")
 
         selected = []
-
         def onclick(event):
             if event.inaxes != ax:
                 return
@@ -105,16 +106,13 @@ class TorqueMeasurement:
             selected.append(idx)
             ax.axvline(idx, color="red", linestyle="--")
             fig.canvas.draw()
-            print(f"Clicked index {idx}")
 
             if len(selected) == 2:
                 fig.canvas.mpl_disconnect(cid)
                 left, right = sorted(selected)
-                print(f"Selection complete: left={left}, right={right}")
                 self.leftCutoff = left
                 self.rightCutoff = right
                 plt.close()
-                print(f"Using data from index {self.leftCutoff} to {self.rightCutoff}")
 
         cid = fig.canvas.mpl_connect("button_press_event", onclick)
         plt.show()   # this returns immediately in widget backend
@@ -125,3 +123,34 @@ class TorqueMeasurement:
 
     def __del__(self):
         pass
+
+    def calcIc(obj):
+        cleanAngle = obj.angle[obj.leftCutoff:obj.rightCutoff]
+        cleanLoad = obj.loadcell[obj.leftCutoff:obj.rightCutoff]
+        cleanField = obj.field[obj.leftCutoff:obj.rightCutoff]
+        badSpots = np.where(np.diff(cleanAngle) == 0)[0]
+        cleanAngle = np.delete(cleanAngle, badSpots)
+        cleanLoad = np.delete(cleanLoad, badSpots)
+        cleanField = np.delete(cleanField, badSpots)
+        cleanLoad = medfilt(cleanLoad, kernel_size=1)
+        rezFit = np.polyfit([cleanAngle[0], cleanAngle[-1]], [cleanLoad[0], cleanLoad[-1]], 1)
+        slope = rezFit[0]
+        intercept = rezFit[1]
+        holder = slope * cleanAngle + intercept
+        cleanLoad = cleanLoad - holder
+        offset = cleanAngle[np.argmax(cleanLoad)]
+        cleanAngle = cleanAngle - offset
+        offset = np.min(cleanLoad)
+        cleanLoad = cleanLoad - offset
+        x = cleanAngle
+        g = interp1d(cleanAngle, cleanLoad, bounds_error=False, fill_value="extrapolate")
+        ic = (obj.coeff * 4 * 1.3) / (100 * obj.width * obj.length * (1 - (obj.width / (3 * obj.length))))
+        ic2 = ic * g(x)
+        ic2 = ic2 / (np.mean(cleanField) * np.cos(np.deg2rad(x)))
+        result = {}
+        result_angle = cleanAngle[(cleanAngle > -30) & (cleanAngle < 30)]
+        result['angle'] = np.linspace(np.min(result_angle), np.max(result_angle), len(result_angle))
+        z = interp1d(cleanAngle, ic2 * 1000, bounds_error=False, fill_value="extrapolate")
+        result['ic'] = z(result['angle'])
+    
+        return result
