@@ -4,13 +4,6 @@ import filedialpy as fd
 
 
 class TorqueMeasurement:
-    """
-    Container for data generated from Jan Jaroszynski's torque magnetometer
-    utilizing NML DAQ at NHMFL.
-
-    Parses the text file generated from the DAQ program and allows calculation
-    of Ic by requesting user parameters and cleaning/scaling the data.
-    """
 
     def __init__(self):
         # File selection dialog
@@ -19,7 +12,6 @@ class TorqueMeasurement:
             raise ValueError("No file selected.")
 
         # Load data (skip 10 header lines like MATLAB importdata)
-        headerLine = 0
         headers = []
         with open(filepath) as myFile:
             for num, line in enumerate(myFile, 1):
@@ -27,7 +19,7 @@ class TorqueMeasurement:
                     i = num
                     headers = line.strip().split('\t')
                     break
-        data=np.loadtxt(filepath, delimiter='\t',skiprows=headerLine)
+        data=np.loadtxt(filepath, delimiter='\t',skiprows=i)
 
         # Expected headers
         standard_headers = [
@@ -37,25 +29,23 @@ class TorqueMeasurement:
             "HtrPwr_",
             "Voltmeter_",
             "Lockin_V_",
-            "Timestamp",
+            "Timestamp"
+        ]
+
+        semiStandard_headers = [
+            "Field_001",
+            "loadCell_001",
+            "temperature_001",
+            "angle_001",
+            "pickupCoil_001",
+            "Timestamp_001"
         ]
 
         # Check if headers match expected
         standard = all(std in h for std, h in zip(standard_headers, headers))
-        print(standard)
-        '''
-        if not standard:
-            print("Headers found:")
-            print(headers)
-
-            self.temperature = data[:, int(input("Which column is temperature? [#] > ")) - 1]
-            self.time = data[:, int(input("Which column is time? [#] > ")) - 1]
-            self.field = data[:, int(input("Which column is magnetic field? [#] > ")) - 1]
-            self.loadcell = data[:, int(input("Which column is lock-in voltage (load cell)? [#] > ")) - 1]
-            self.pickupcoil = 2.7 * data[:, int(input("Which column is keithley voltage (pickup coil)? [#] > ")) - 1] / 360
-            self.heaterpower = data[:, int(input("Which column is heater power? [#] > ")) - 1]
-            self.angle = 2.7 * data[:, int(input("Which column is angle? [#] > ")) - 1] / 360
-        else:
+        semiStandard = all(std in h for std, h in zip(semiStandard_headers, headers))
+        
+        if standard:
             self.angle = 2.7 * data[:, 0] / 360
             self.field = data[:, 1]
             self.temperature = data[:, 2]
@@ -63,55 +53,75 @@ class TorqueMeasurement:
             self.pickupcoil = 2.7 * data[:, 4] / 360
             self.loadcell = data[:, 5]
             self.time = data[:, 6]
+        elif semiStandard:
+            self.temperature = data[:, 2]
+            self.time = data[:, 5]
+            self.field = data[:, 0]
+            self.loadcell = data[:, 1]
+            self.pickupcoil = 2.7 * data[:, 4] / 360
+            self.heaterpower = data[:, 2]
+            self.angle = 2.7 * data[:, 3] / 360
+        else:
+            print("Headers found:")
+            print(headers)
+            self.temperature = data[:, int(input("Which column is temperature? [#] > ")) - 1]
+            self.time = data[:, int(input("Which column is time? [#] > ")) - 1]
+            self.field = data[:, int(input("Which column is magnetic field? [#] > ")) - 1]
+            self.loadcell = data[:, int(input("Which column is lock-in voltage (load cell)? [#] > ")) - 1]
+            self.pickupcoil = 2.7 * data[:, int(input("Which column is keithley voltage (pickup coil)? [#] > ")) - 1] / 360
+            self.heaterpower = data[:, int(input("Which column is heater power? [#] > ")) - 1]
+            self.angle = 2.7 * data[:, int(input("Which column is angle? [#] > ")) - 1] / 360
+        
 
         # Ask for sample dimensions
-        self.width = float(input("What is the width of your sample? [m] > "))
-        self.length = float(input("What is the length of your sample? [m] > "))
+        self.width = 4e-3   #float(input("What is the width of your sample? [m] > "))
+        self.length = 13e-3 #float(input("What is the length of your sample? [m] > "))
 
         # Probe selection
-        probe = int(input("Which probe did you use? (1 or 2) > "))
+        probe = 1   #int(input("Which probe did you use? (1 or 2) > "))
         if probe == 1:
             self.coeff = 5.4059
         elif probe == 2:
             self.coeff = 5.1669
         else:
             raise ValueError("Invalid probe selection.")
-
-        # First plot: Load vs Angle
-        plt.figure()
-        plt.title("Load vs Time")
-        plt.ylabel("Load [V]")
-        plt.xlabel("Angle [°]")
-        plt.scatter(self.angle, self.loadcell)
-        plt.show(block=False)
-        plt.pause(1)
-
-        # Ask where rotation reverses
-        cutoff_angle = float(input("At what angle does the rotation reverse? > "))
-        idx = np.argmax(self.angle > cutoff_angle)
+        
+        idx = np.where(np.diff(self.angle) <0)[0][0]
         self.rightCutoff = idx
-        plt.close()
 
-        # Second plot: Load vs Index
-        plt.figure()
+        fig,ax = plt.subplots()
+        plt.scatter(np.arange(1, idx), self.loadcell[1:idx])
         plt.title("Load vs Time")
         plt.ylabel("Load [V]")
         plt.xlabel("Index [#]")
-        cutLoad = self.loadcell[:idx]
-        plt.scatter(np.arange(len(cutLoad)), cutLoad)
-        plt.show(block=False)
-        plt.pause(1)
 
-        self.leftCutoff = int(input("Where is the leftmost minima? > "))
-        plt.axvline(self.leftCutoff, color="r")
+        selected = []
 
-        self.rightCutoff = int(input("Where is the rightmost minima? > "))
-        plt.axvline(self.rightCutoff, color="g")
+        def onclick(event):
+            if event.inaxes != ax:
+                return
+            x, y = event.xdata, event.ydata
+            idx = int(round(x))
+            selected.append(idx)
+            ax.axvline(idx, color="red", linestyle="--")
+            fig.canvas.draw()
+            print(f"Clicked index {idx}")
 
-        plt.show(block=True)
-        plt.close()
-'''
+            if len(selected) == 2:
+                fig.canvas.mpl_disconnect(cid)
+                left, right = sorted(selected)
+                print(f"Selection complete: left={left}, right={right}")
+                self.leftCutoff = left
+                self.rightCutoff = right
+                plt.close()
+                print(f"Using data from index {self.leftCutoff} to {self.rightCutoff}")
+
+        cid = fig.canvas.mpl_connect("button_press_event", onclick)
+        plt.show()   # this returns immediately in widget backend
+        
+        # Wait for the user to finish selection before proceeding
+        while not hasattr(self, 'leftCutoff') or not hasattr(self, 'rightCutoff'):
+            plt.pause(0.1)
+
     def __del__(self):
-        # Destructor for TorqueMeasurement
-        # No explicit resource management needed, but can be used for cleanup
         pass
