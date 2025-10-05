@@ -4,12 +4,18 @@ import filedialpy as fd
 from scipy.signal import medfilt
 from scipy.interpolate import interp1d
 from scipy.optimize import curve_fit
+from scipy.signal import argrelextrema
+
 Colors = ['b', 'r', 'g', 'c', 'm', 'y', 'k']
 
 def doubleLorentz(x, a, b, c, d, e, f):
         term1 = (a * b / np.pi) / (np.cos(np.radians(x-e))**2 + (b**2) * np.sin(np.radians(x-e))**2)
         term2 = (c * d / np.pi) / (np.cos(np.radians(x-f))**2 + (d**2) * np.sin(np.radians(x-f))**2)
         return term1 + term2
+
+def singleLorentz(x, a, b, c):
+        term1 = (a * b / np.pi) / (np.cos(np.radians(x-c))**2 + (b**2) * np.sin(np.radians(x-c))**2)
+        return term1
 
 class TorqueMeasurement:
 
@@ -179,16 +185,26 @@ class TorqueMeasurement:
 
         if bool2Plot:
             angles = np.arange(-20, 20.1, 0.1)
-            ics = doubleLorentz(angles, *i0sGammas)
-            plt.scatter(temp['angle'], temp['ic'], c='black', label='_nolegend_', s=20)
+            
+            plt.scatter(temp['angle'], temp['ic'], c='black', s=20)
             plt.xlim([-20, 20])
+
+            ics = doubleLorentz(angles, *i0sGammas)
+            maxima = argrelextrema(ics, np.greater)
+
             plt.plot(angles, ics, color='red', linewidth=2)
+            plt.axvline(angles[maxima], color='red', linewidth=1,label='_nolegend_')
+            plt.plot(angles, singleLorentz(angles, i0sGammas[0], i0sGammas[1], i0sGammas[4]), color='blue', linestyle='--', linewidth=2)
+            plt.axvline(i0sGammas[4], color='blue', linewidth=1,label='_nolegend_')
+            plt.plot(angles, singleLorentz(angles, i0sGammas[2], i0sGammas[3], i0sGammas[5]), color='green', linestyle='--', linewidth=2)
+            plt.axvline(i0sGammas[5], color='green', linewidth=1,label='_nolegend_')
             plt.xlabel(r'Angle $\left[°\right]$', fontsize=25)
             plt.ylabel(r'$I_{c}$ $\left[A\right]$', fontsize=25)
             plt.grid(True)
-            plt.title(r'$I_c(\theta) = \frac{I_1\Gamma_{1}}{cos^2(\theta{} - \theta_{1}) + \Gamma{}_{1}^{2}sin^2(\theta{}-\theta_{1})} + \frac{I_2\Gamma_{2}}{cos^2(\theta{}-\theta_{2}) + \Gamma{}_{2}^{2}sin^2(\theta{}-\theta_{2})}$', fontsize=25)
+            plt.legend(['Data', 'Double Lorentzian Fit', 'First Lorentzian Component', 'Second Lorentzian Component'], fontsize=20)
+            plt.title(r'$I_c(\theta-\theta_0) = \frac{I_1\Gamma_{1}}{cos^2(\theta{} - \theta_{1}) + \Gamma{}_{1}^{2}sin^2(\theta{}-\theta_{1})} + \frac{I_2\Gamma_{2}}{cos^2(\theta{}-\theta_{2}) + \Gamma{}_{2}^{2}sin^2(\theta{}-\theta_{2})}$', fontsize=25)
             plt.gca().tick_params(labelsize=25)
-            plt.text(-15, 0.8 * np.max(temp['ic']), f'$I_1$ = {i0sGammas[0]:.2f} [A]\n$\\Gamma_1$ = {i0sGammas[1]:.2f}\n$\\theta_1$ = {i0sGammas[4]:.2f}[rad]\n$I_2$ = {i0sGammas[2]:.2f} [A]\n$\\Gamma_2$ = {i0sGammas[3]:.2f}\n$\\theta_2$ = {i0sGammas[5]:.2f} [rad]', fontsize=20, bbox=dict(facecolor='white', alpha=0.5))
+            plt.text(-15, 0.6 * np.max(temp['ic']), f'$I_1$ = {i0sGammas[0]:.2f} [A]\n$\\Gamma_1$ = {i0sGammas[1]:.2f}\n$\\theta_1$ = {i0sGammas[4]:.2f}[°]\n$I_2$ = {i0sGammas[2]:.2f} [A]\n$\\Gamma_2$ = {i0sGammas[3]:.2f}\n$\\theta_2$ = {i0sGammas[5]:.2f} [°]\n$\\theta_0$ = {float(angles[maxima]):.2f} [°]', fontsize=20, bbox=dict(facecolor='white', alpha=0.5))
             figManager = plt.get_current_fig_manager()
             figManager.window.showMaximized()
             plt.show()
