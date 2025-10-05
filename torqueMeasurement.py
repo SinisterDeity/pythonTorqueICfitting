@@ -3,7 +3,22 @@ import matplotlib.pyplot as plt
 import filedialpy as fd
 from scipy.signal import medfilt
 from scipy.interpolate import interp1d
+from scipy.optimize import curve_fit
+Colors = ['b', 'r', 'g', 'c', 'm', 'y', 'k']
 
+def doubleLorentz(params, x):
+        a, b, c, d = params['i01'], params['gamma1'], params['i02'], params['gamma2']
+        cos_x = np.cos(np.radians(x))
+        sin_x = np.sin(np.radians(x))
+        term1 = (a * b / np.pi) / (cos_x**2 + (b**2) * sin_x**2)
+        term2 = (c * d / np.pi) / (cos_x**2 + (d**2) * sin_x**2)
+        return term1 + term2
+
+def singleLorentz(params, x):
+    i0, gamma = params['i0'], params['gamma']
+    cos_x = np.cos(np.radians(x))
+    sin_x = np.sin(np.radians(x))
+    return (i0 * gamma / np.pi) / (cos_x**2 + (gamma**2) * sin_x**2)
 
 class TorqueMeasurement:
 
@@ -154,3 +169,42 @@ class TorqueMeasurement:
         result['ic'] = z(result['angle'])
     
         return result
+    
+    def icAngleFit(obj, bool2Plot):
+        def fit_func(x, a, b, c, d):
+            cos_x = np.cos(np.radians(x))
+            sin_x = np.sin(np.radians(x))
+            term1 = (a * b / np.pi) / (cos_x**2 + (b**2) * sin_x**2)
+            term2 = (c * d / np.pi) / (cos_x**2 + (d**2) * sin_x**2)
+            return term1 + term2
+        temp = obj.calcIc()
+        x= temp['angle']
+        y= temp['ic']
+        these = (x > -20) & (x < 20)
+        x = x[these]
+        y = y[these]
+
+        # Initial guess and bounds
+        p0 = [1, 3, 1, 12]
+        lower_bounds = [0, 1, 0, 1]
+        upper_bounds = [np.inf, 5, np.inf, 15]
+
+        # Fit model to data
+        i0sGammas, _ = curve_fit(fit_func, x, y, p0=p0, bounds=(lower_bounds, upper_bounds), method='trf', max_nfev=1000)
+
+        if bool2Plot:
+            angles = np.arange(-20, 20.1, 0.1)
+            temp2 = {'i01': i0sGammas[0], 'gamma1': i0sGammas[1], 'i02': i0sGammas[2], 'gamma2': i0sGammas[3]}
+            ics = doubleLorentz(temp2, angles)
+            plt.scatter(temp['angle'], temp['ic'], c='black', label='_nolegend_', s=20)
+            plt.xlim([-20, 20])
+            plt.plot(angles, ics, color='red', linewidth=2)
+            plt.xlabel(r'Angle $\left[°\right]$', fontsize=25)
+            plt.ylabel(r'$I_{c}$ $\left[A\right]$', fontsize=25)
+            plt.grid(True)
+            plt.title(r'$I_c(\theta) = \frac{I_1\Gamma_{1}}{cos^2(\theta{}) + \Gamma{}_{1}^{2}sin^2(\theta{})} + \frac{I_2\Gamma_{2}}{cos^2(\theta{}) + \Gamma{}_{2}^{2}sin^2(\theta{})}$', fontsize=25)
+            plt.gca().tick_params(labelsize=25)
+            plt.text(-15, 0.8 * np.max(temp['ic']), f'$I_1$ = {i0sGammas[0]:.2f} A\n$\\Gamma_1$ = {i0sGammas[1]:.2f}\n$I_2$ = {i0sGammas[2]:.2f} A\n$\\Gamma_2$ = {i0sGammas[3]:.2f}', fontsize=20, bbox=dict(facecolor='white', alpha=0.5))
+            plt.show()
+
+        return i0sGammas
